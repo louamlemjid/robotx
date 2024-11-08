@@ -1,0 +1,109 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
+#include <IRremoteESP8266.h>
+#include <IRsend.h>
+// Wi-Fi credentials
+const char* ssid = "AndroidAP";            // Hardcoded Wi-Fi SSID
+const char* password = "123456789"; 
+
+const uint16_t kIrLedPin = 5;
+
+// Create an IRsend object
+IRsend irsend(kIrLedPin);
+void setup() {
+  Serial.begin(115200);
+  delay(100);
+
+  // Initialize the IR LED
+  irsend.begin();
+  // Set the LED pin as output
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  // Connect to Wi-Fi
+  connectToWiFi();
+
+  // Wait until the device is connected to the Wi-Fi network
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nConnected to Wi-Fi");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void loop() {
+  // If the ESP8266 is connected to Wi-Fi, make an HTTP GET request
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFiClientSecure client;
+    HTTPClient http;
+
+    // Optionally skip SSL verification
+    client.setInsecure();
+
+    // Construct the URL using global variables
+    String url = "https://smartx.serveo.net/";
+
+    http.begin(client, url); // Use global variables to form URL
+
+    int httpCode = http.GET(); // Send GET request
+
+    if (httpCode > 0) {
+      // Get the response payload
+      String payload = http.getString();
+      Serial.println("Response payload:");
+      Serial.println(payload);
+
+      // Parse the JSON object
+      DynamicJsonDocument doc(1024);
+      DeserializationError error = deserializeJson(doc, payload);
+
+      if (!error) {
+        JsonArray signal = doc["signal"].as<JsonArray>();
+        int signalLength = signal.size();
+        uint16_t irSignal[signalLength];
+        
+        for (int i = 0; i < signalLength; i++) {
+          irSignal[i] = signal[i].as<uint16_t>();
+        }
+
+        // Emit the IR signal
+        Serial.println("Emitting IR signal : ");
+        Serial.println(irSignal);
+        irsend.sendRaw(irSignal, signalLength, 38);  // 38kHz frequency for IR transmission
+        Serial.println("Signal sent.");
+      } else {
+        Serial.print("deserializeJson() failed: ");
+        Serial.println(error.c_str());
+      }
+    } else {
+      Serial.printf("Error on HTTP request: %d\n", httpCode);
+    }
+
+    http.end(); // Close the connection
+  }
+
+  delay(10000); // Check every 10 seconds
+}
+
+void connectToWiFi() {
+  WiFi.begin(ssid, password);
+  Serial.println("Connecting to Wi-Fi...");
+
+  int tries = 10;
+  while (--tries && WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nConnected to Wi-Fi");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("Failed to connect to Wi-Fi");
+  }
+}
